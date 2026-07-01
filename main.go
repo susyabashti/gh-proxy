@@ -248,34 +248,35 @@ func fetchInstallationToken(jwtStr, installID string) (*GitHubTokenResponse, err
 
 // executeCommand runs the CLI tool, sanitizes the env vars, and injects the tokens
 func executeCommand(args []string, token string) int {
-	// 1. Find the path to the executable
 	binary, err := exec.LookPath(args[0])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Binary not found: %s\n", args[0])
 		return 1
 	}
 
-	// 2. Prepare the environment
 	var env []string
 	for _, e := range os.Environ() {
+		// Filter out sensitive App config AND existing token variations
+		// to prevent duplicate or conflicting environment variables
 		if strings.HasPrefix(e, "GITHUB_APP_ID=") ||
 			strings.HasPrefix(e, "GITHUB_PRIVATE_KEY=") ||
-			strings.HasPrefix(e, "GITHUB_INSTALLATION_ID=") {
+			strings.HasPrefix(e, "GITHUB_INSTALLATION_ID=") ||
+			strings.HasPrefix(e, "GITHUB_TOKEN=") ||
+			strings.HasPrefix(e, "GH_TOKEN=") ||
+			strings.HasPrefix(e, "GITHUB_PERSONAL_ACCESS_TOKEN=") {
 			continue
 		}
 		env = append(env, e)
 	}
+
+	// Append only the fresh, clean tokens
 	env = append(env,
 		"GITHUB_TOKEN="+token,
 		"GH_TOKEN="+token,
 		"GITHUB_PERSONAL_ACCESS_TOKEN="+token,
 	)
 
-	// 3. Exec replaces the current process with the new command
-	// This maintains the same PID and stdio streams for the MCP server
 	err = syscall.Exec(binary, args, env)
-
-	// If Exec returns, it means there was an error
 	fmt.Fprintf(os.Stderr, "❌ Failed to exec command: %v\n", err)
 	return 1
 }

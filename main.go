@@ -48,17 +48,21 @@ func main() {
 		os.Exit(0)
 	}
 
-	for _, e := range os.Environ() {
-		fmt.Fprintf(os.Stderr, "PROXY_ENV: %s\n", e)
-	}
-
 	os.Exit(run())
 }
 
+func getEnv(key string) string {
+	return strings.TrimSpace(os.Getenv(key))
+}
+
 func run() int {
-	appID := os.Getenv("GITHUB_APP_ID")
+	appID := getEnv("GITHUB_APP_ID")
 	privateKeyRaw := os.Getenv("GITHUB_PRIVATE_KEY")
 	installID := os.Getenv("GITHUB_INSTALLATION_ID")
+
+	fmt.Fprintf(os.Stderr, "DEBUG: Checking GITHUB_APP_ID: '%s' (len: %d)\n", appID, len(appID))
+	fmt.Fprintf(os.Stderr, "DEBUG: Checking GITHUB_PRIVATE_KEY: '%s' (len: %d)\n", privateKeyRaw, len(privateKeyRaw))
+	fmt.Fprintf(os.Stderr, "DEBUG: Checking GITHUB_INSTALLATION_ID: '%s' (len: %d)\n", installID, len(installID))
 
 	if appID == "" || privateKeyRaw == "" || installID == "" {
 		fmt.Fprintf(os.Stderr, "❌ Missing required environment variables: GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_INSTALLATION_ID\n")

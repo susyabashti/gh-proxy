@@ -18,7 +18,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -34,7 +36,18 @@ type GitHubTokenResponse struct {
 	Token     string    `json:"token"`
 }
 
+var (
+	version = "main"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("gh-proxy version %s (commit: %s, built at: %s)\n", version, commit, date)
+		os.Exit(0)
+	}
+
 	os.Exit(run())
 }
 
@@ -49,12 +62,31 @@ func run() int {
 	}
 
 	args := os.Args[1:]
-	command := "gh"
-	commandArgs := []string{}
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error: 'gh' binary not found in PATH\n")
+		return 1
+	}
 
-	if len(args) > 0 {
-		command = args[0]
+	var command string
+	var commandArgs []string
+
+	if len(args) == 0 {
+		// Default: no args, run 'gh'
+		command = ghPath
+		commandArgs = []string{}
+	} else if args[0] == "--" {
+		// Explicit override: everything after '--' is for 'gh'
+		command = ghPath
 		commandArgs = args[1:]
+	} else if path, err := exec.LookPath(args[0]); err == nil {
+		// If the first argument is an actual binary (e.g., 'git'), run it
+		command = path
+		commandArgs = args[1:]
+	} else {
+		// Assume it's a 'gh' command (e.g., 'auth', 'pr')
+		command = ghPath
+		commandArgs = args
 	}
 
 	// 1. Resolve Private Key (File or Raw string)
@@ -82,8 +114,10 @@ func run() int {
 	var validToken string
 	cached, err := loadEncryptedCache(cacheFile, encryptionKey)
 
-	// Buffer of 5 minutes to ensure token doesn't expire during command execution
-	if err == nil && time.Now().Add(5*time.Minute).Before(cached.ExpiresAt) {
+	// Buffer of X minutes to ensure token doesn't expire during command execution
+	// where X is determined by the GITHUB_ROTATE_BUFFER_MINUTES environment variable
+	rotateBuffer := getRotationBuffer()
+	if err == nil && time.Now().Add(rotateBuffer).Before(cached.ExpiresAt) {
 		validToken = cached.Token
 	} else {
 		// 4. Cache missed or token expired: Fetch a new one
@@ -214,14 +248,14 @@ func fetchInstallationToken(jwtStr, installID string) (*GitHubTokenResponse, err
 
 // executeCommand runs the CLI tool, sanitizes the env vars, and injects the tokens
 func executeCommand(args []string, token string) int {
-	cmd := exec.Command(args[0], args[1:]...)
+	// 1. Find the path to the executable
+	binary, err := exec.LookPath(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Binary not found: %s\n", args[0])
+		return 1
+	}
 
-	// Pass through standard streams seamlessly
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// Filter out sensitive GitHub App vars so child processes don't inherit them
+	// 2. Prepare the environment
 	var env []string
 	for _, e := range os.Environ() {
 		if strings.HasPrefix(e, "GITHUB_APP_ID=") ||
@@ -231,24 +265,19 @@ func executeCommand(args []string, token string) int {
 		}
 		env = append(env, e)
 	}
-
-	// Inject the short-lived installation token
 	env = append(env,
 		"GITHUB_TOKEN="+token,
 		"GH_TOKEN="+token,
 		"GITHUB_PERSONAL_ACCESS_TOKEN="+token,
 	)
-	cmd.Env = env
 
-	if err := cmd.Run(); err != nil {
-		if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
-			return exitError.ExitCode()
-		}
-		fmt.Fprintf(os.Stderr, "❌ Command execution failed: %v\n", err)
-		return 1
-	}
+	// 3. Exec replaces the current process with the new command
+	// This maintains the same PID and stdio streams for the MCP server
+	err = syscall.Exec(binary, args, env)
 
-	return 0
+	// If Exec returns, it means there was an error
+	fmt.Fprintf(os.Stderr, "❌ Failed to exec command: %v\n", err)
+	return 1
 }
 
 // --- Encryption and Cache Helpers ---
@@ -316,4 +345,21 @@ func loadEncryptedCache(path string, key []byte) (*TokenCache, error) {
 // base64URLEncode encodes data to base64url format without padding as required by JWT standard
 func base64URLEncode(b []byte) string {
 	return strings.TrimRight(base64.URLEncoding.EncodeToString(b), "=")
+}
+
+func getRotationBuffer() time.Duration {
+	// Default to 15 minutes
+	const defaultBuffer = 15 * time.Minute
+
+	val := os.Getenv("GITHUB_ROTATE_BUFFER_MINUTES")
+	if val == "" {
+		return defaultBuffer
+	}
+
+	if intVal, err := strconv.Atoi(val); err == nil {
+		return time.Duration(intVal) * time.Minute
+	}
+
+	// Fallback to default on error
+	return defaultBuffer
 }

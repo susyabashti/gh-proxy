@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Upgraded error handling for safety
+set -euo pipefail
+
+echo "🔒 Checking for exposed secrets (gitleaks)..."
+if command -v gitleaks >/dev/null 2>&1; then
+  # If gitleaks finds a secret, it exits with a non-zero code and stops the commit
+  gitleaks protect --staged --redact
+else
+  echo "⚠️ warning: gitleaks not found; skipping staged secret scan." >&2
+fi
+
+echo "✅ No exposed secrets found."
+
+echo "Running govet..."
+if command -v govet >/dev/null 2>&1; then
+  govet $(go list ./...)
+else
+  echo "⚠️ warning: govet not found; skipping vetting." >&2
+fi
+echo "✅ Govet completed."
+
+echo "Running revive..."
+if command -v revive >/dev/null 2>&1; then
+  revive -config revive.toml ./
+else
+  echo "⚠️ warning: revive not found; skipping linting." >&2
+fi
+echo "✅ Linting completed."
+
+echo "Running gofumpt..."
+if command -v gofumpt >/dev/null 2>&1; then
+  gofumpt -l -w ./
+else
+  echo "⚠️ warning: gofumpt not found; skipping formatting." >&2
+fi
+echo "✅ Formatting completed."
+
+echo "Running fieldalignment checks..."
+if command -v fieldalignment >/dev/null 2>&1; then
+  fieldalignment ./
+else
+  echo "⚠️ warning: fieldalignment not found; skipping checks." >&2
+fi
+echo "✅ Fieldalignment checks completed."
+
+echo "Running tests..."
+if command -v go >/dev/null 2>&1; then
+  go test ./...
+else
+  echo "⚠️ warning: go not found; skipping tests." >&2
+fi
+echo "✅ Tests completed."

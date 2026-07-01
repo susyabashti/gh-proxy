@@ -43,20 +43,6 @@ var (
 )
 
 func main() {
-	args := os.Args[1:]
-
-	// --- SMART BYPASS ---
-	// If Git is calling us for credentials, we bypass proxy logic entirely.
-	if len(args) >= 2 && args[0] == "auth" && args[1] == "git-credential" {
-		realGh, err := getGhPath()
-		if err != nil {
-			os.Exit(1)
-		}
-		// Direct exec of the real binary, passing through existing environment
-		syscall.Exec(realGh, append([]string{realGh}, args...), os.Environ())
-		os.Exit(1)
-	}
-
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
 		fmt.Printf("gh-proxy version %s (commit: %s, built at: %s)\n", version, commit, date)
 		os.Exit(0)
@@ -73,10 +59,6 @@ func run() int {
 	appID := getEnv("GITHUB_APP_ID")
 	privateKeyRaw := os.Getenv("GITHUB_PRIVATE_KEY")
 	installID := os.Getenv("GITHUB_INSTALLATION_ID")
-
-	fmt.Fprintf(os.Stderr, "DEBUG: Checking GITHUB_APP_ID: '%s' (len: %d)\n", appID, len(appID))
-	fmt.Fprintf(os.Stderr, "DEBUG: Checking GITHUB_PRIVATE_KEY: '%s' (len: %d)\n", privateKeyRaw, len(privateKeyRaw))
-	fmt.Fprintf(os.Stderr, "DEBUG: Checking GITHUB_INSTALLATION_ID: '%s' (len: %d)\n", installID, len(installID))
 
 	if appID == "" || privateKeyRaw == "" || installID == "" {
 		fmt.Fprintf(os.Stderr, "❌ Missing required environment variables: GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_INSTALLATION_ID\n")
@@ -388,10 +370,38 @@ func getRotationBuffer() time.Duration {
 }
 
 func getGhPath() (string, error) {
-	// 1. Check for the user-defined path via environment variable
+	// Get the absolute path of this running binary
+	self, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine self path: %w", err)
+	}
+
+	// 1. Check for the user-defined path
 	if path := os.Getenv("GH_CLI_PATH"); path != "" {
+		absPath, err := filepath.Abs(path)
+		if err == nil && absPath == self {
+			return "", fmt.Errorf("GH_CLI_PATH is configured to point at the proxy itself, which would cause an infinite loop")
+		}
+
+		if _, err := os.Stat(path); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️ Warning: GH_CLI_PATH is set to '%s', but the file does not exist.\n", path)
+		}
 		return path, nil
 	}
+
 	// 2. Fallback to looking it up in PATH
-	return exec.LookPath("gh")
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return "", err
+	}
+
+	// 3. Prevent fallback to self
+	absPath, err := filepath.Abs(path)
+	if err == nil && absPath == self {
+		return "", fmt.Errorf("the 'gh' found in PATH is the proxy itself; check your PATH precedence or set GH_CLI_PATH explicitly")
+	}
+
+	fmt.Fprintf(os.Stderr, "⚠️ Warning: GH_CLI_PATH not set. Falling back to 'gh' found at: %s\n", path)
+
+	return path, nil
 }

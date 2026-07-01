@@ -62,9 +62,9 @@ func run() int {
 	}
 
 	args := os.Args[1:]
-	ghPath, err := exec.LookPath("gh")
+	ghPath, err := getGhPath()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error: 'gh' binary not found in PATH\n")
+		fmt.Fprintf(os.Stderr, "❌ Error: 'gh' binary not found. Set GH_CLI_PATH or ensure 'gh' is in PATH.\n")
 		return 1
 	}
 
@@ -363,4 +363,13 @@ func getRotationBuffer() time.Duration {
 
 	// Fallback to default on error
 	return defaultBuffer
+}
+
+func getGhPath() (string, error) {
+	// 1. Check for the user-defined path via environment variable
+	if path := os.Getenv("GH_CLI_PATH"); path != "" {
+		return path, nil
+	}
+	// 2. Fallback to looking it up in PATH
+	return exec.LookPath("gh")
 }

@@ -52,3 +52,4 @@ release version: check
     git push origin {{version}}
 
     echo "✅ Released {{version}}. CI will now build and distribute."
+    GITHUB_TOKEN=$(gh auth token) goreleaser release --clean

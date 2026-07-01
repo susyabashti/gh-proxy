@@ -43,6 +43,20 @@ var (
 )
 
 func main() {
+	args := os.Args[1:]
+
+	// --- SMART BYPASS ---
+	// If Git is calling us for credentials, we bypass proxy logic entirely.
+	if len(args) >= 2 && args[0] == "auth" && args[1] == "git-credential" {
+		realGh, err := getGhPath()
+		if err != nil {
+			os.Exit(1)
+		}
+		// Direct exec of the real binary, passing through existing environment
+		syscall.Exec(realGh, append([]string{realGh}, args...), os.Environ())
+		os.Exit(1)
+	}
+
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
 		fmt.Printf("gh-proxy version %s (commit: %s, built at: %s)\n", version, commit, date)
 		os.Exit(0)

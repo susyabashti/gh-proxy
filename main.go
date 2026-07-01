@@ -48,6 +48,10 @@ func main() {
 		os.Exit(0)
 	}
 
+	for _, e := range os.Environ() {
+		fmt.Fprintf(os.Stderr, "PROXY_ENV: %s\n", e)
+	}
+
 	os.Exit(run())
 }
 

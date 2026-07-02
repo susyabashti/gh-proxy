@@ -21,7 +21,7 @@ check:
     @fieldalignment ./... || echo "⚠️ fieldalignment not found, skipping"
 
     @echo "✅ Running tests..."
-    @go test ./...
+    @go test -v -race -count=1 ./...
 
 release version: check
     #!/usr/bin/env bash

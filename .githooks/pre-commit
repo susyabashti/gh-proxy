@@ -46,7 +46,7 @@ echo "✅ Fieldalignment checks completed."
 
 echo "Running tests..."
 if command -v go >/dev/null 2>&1; then
-  go test ./...
+  go test -v -race -count=1 ./...
 else
   echo "⚠️ warning: go not found; skipping tests." >&2
 fi

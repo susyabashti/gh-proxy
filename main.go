@@ -43,20 +43,26 @@ var (
 )
 
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Printf("gh-proxy version %s (commit: %s, built at: %s)\n", version, commit, date)
-		os.Exit(0)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v":
+			fmt.Printf("gh-proxy version %s (commit: %s, built at: %s)\n", version, commit, date)
+			os.Exit(0)
+		case "--help", "-h", "help":
+			// Print context to Stderr so it doesn't pollute stdout if piped,
+			// then let run() fall through to execute the real 'gh' binary.
+			fmt.Fprintln(os.Stderr, "ℹ️ [Environment Notice] This environment utilizes 'gh-proxy'.")
+			fmt.Fprintln(os.Stderr, "   Authentication tokens are dynamically generated via GitHub App credentials")
+			fmt.Fprintln(os.Stderr, "   and injected automatically. Standard 'gh' syntax is fully preserved.")
+			fmt.Fprintln(os.Stderr, "------------------------------------------------------------------------")
+		}
 	}
 
 	os.Exit(run())
 }
 
-func getEnv(key string) string {
-	return strings.TrimSpace(os.Getenv(key))
-}
-
 func run() int {
-	appID := getEnv("GITHUB_APP_ID")
+	appID := os.Getenv("GITHUB_APP_ID")
 	privateKeyRaw := os.Getenv("GITHUB_PRIVATE_KEY")
 	installID := os.Getenv("GITHUB_INSTALLATION_ID")
 
@@ -65,33 +71,13 @@ func run() int {
 		return 1
 	}
 
-	args := os.Args[1:]
 	ghPath, err := getGhPath()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error: 'gh' binary not found. Set GH_CLI_PATH or ensure 'gh' is in PATH.\n")
 		return 1
 	}
 
-	var command string
-	var commandArgs []string
-
-	if len(args) == 0 {
-		// Default: no args, run 'gh'
-		command = ghPath
-		commandArgs = []string{}
-	} else if args[0] == "--" {
-		// Explicit override: everything after '--' is for 'gh'
-		command = ghPath
-		commandArgs = args[1:]
-	} else if path, err := exec.LookPath(args[0]); err == nil {
-		// If the first argument is an actual binary (e.g., 'git'), run it
-		command = path
-		commandArgs = args[1:]
-	} else {
-		// Assume it's a 'gh' command (e.g., 'auth', 'pr')
-		command = ghPath
-		commandArgs = args
-	}
+	command, commandArgs := resolveRouting(os.Args[1:], ghPath)
 
 	// 1. Resolve Private Key (File or Raw string)
 	privateKeyPEM, err := resolvePrivateKey(privateKeyRaw)
@@ -152,6 +138,44 @@ func run() int {
 
 	// 5. Execute the underlying command
 	return executeCommand(append([]string{command}, commandArgs...), validToken)
+}
+
+func resolveRouting(args []string, ghPath string) (string, []string) {
+	if len(args) == 0 {
+		return ghPath, []string{}
+	}
+
+	if args[0] == "--" {
+		return ghPath, args[1:]
+	}
+
+	// Global flags should go straight to the real gh CLI
+	if strings.HasPrefix(args[0], "-") {
+		return ghPath, args
+	}
+
+	// Match every command, alias, and help topic from your exact `gh --help` output
+	isGhSubcommand := false
+	switch args[0] {
+	case "auth", "browse", "codespace", "gist", "issue", "org", "pr", "project", "release", "repo", "skill",
+		"cache", "run", "workflow", "co", "agent-task", "alias", "api", "attestation", "completion",
+		"config", "copilot", "extension", "gpg-key", "label", "licenses", "preview", "ruleset",
+		"search", "secret", "ssh-key", "status", "variable", "help", "accessibility", "actions",
+		"environment", "exit-codes", "formatting", "mintty", "reference", "telemetry":
+		isGhSubcommand = true
+	}
+
+	if isGhSubcommand {
+		return ghPath, args
+	}
+
+	// It's not a known GH command. Check if it's a standalone system binary (e.g., 'git')
+	if path, err := exec.LookPath(args[0]); err == nil {
+		return path, args[1:]
+	}
+
+	// Fallback: If it's completely unrecognized, let the real gh handle the error message
+	return ghPath, args
 }
 
 func resolvePrivateKey(input string) (string, error) {

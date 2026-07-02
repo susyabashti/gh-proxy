@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -23,6 +24,9 @@ import (
 	"syscall"
 	"time"
 )
+
+//go:embed AGENT_NOTICE.md
+var agentNotice string
 
 // TokenCache represents the structure saved to the encrypted cache file
 type TokenCache struct {
@@ -45,15 +49,11 @@ var (
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "--version", "-v":
-			fmt.Printf("gh-proxy version %s (commit: %s, built at: %s)\n", version, commit, date)
-			os.Exit(0)
-		case "--help", "-h", "help":
-			// Print context to Stderr so it doesn't pollute stdout if piped,
-			// then let run() fall through to execute the real 'gh' binary.
-			fmt.Fprintln(os.Stderr, "ℹ️ [Environment Notice] This environment utilizes 'gh-proxy'.")
-			fmt.Fprintln(os.Stderr, "   Authentication tokens are dynamically generated via GitHub App credentials")
-			fmt.Fprintln(os.Stderr, "   and injected automatically. Standard 'gh' syntax is fully preserved.")
+		case "--version", "-v", "--help", "-h", "help":
+			// Print the embedded markdown context to Stderr so the LLM parses the environment state,
+			// followed by a subtle build info line before letting it fall through to the real gh binary.
+			fmt.Fprintln(os.Stderr, agentNotice)
+			fmt.Fprintf(os.Stderr, "*Proxy Build Info: version=%s, commit=%s, date=%s*\n", version, commit, date)
 			fmt.Fprintln(os.Stderr, "------------------------------------------------------------------------")
 		}
 	}
